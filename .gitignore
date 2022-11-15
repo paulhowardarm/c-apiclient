@@ -9,6 +9,7 @@ cmake_install.cmake
 Makefile
 example/Makefile
 lib/Makefile
+shim-prefix
 
 # CMake generates *.dir/ folders for in-tree builds (used by MSVC projects), ignore all of those:
 *.dir/

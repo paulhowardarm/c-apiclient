@@ -4,4 +4,4 @@
 add_library(veraison veraison_client.c)
 
 target_include_directories(veraison PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)
-
+target_include_directories(veraison PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shim)

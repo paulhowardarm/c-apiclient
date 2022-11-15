@@ -20,15 +20,42 @@ extern "C" {
  */
 typedef int veraison_status_t;
 
+#define VERAISON_STATUS_OK ((veraison_status_t) 0)
+
 /**
  * This structure encpasulates the details of a challenge/response API session.
  */
 typedef struct _veraison_challenge_response_session_t {
-    const char *const session_url;
+    /**
+     * This field is reserved for use by the internals of the client library. The caller should not make use
+     * of or alter this value.
+     */
+    void *reserved;
+
+    /**
+     * Nul-terminated string providing the HTTP URL to the API that controls the session.
+     */
+    const char *session_url;
+
+    /**
+     * The number of bytes in the nonce data.
+     */
     size_t nonce_size;
-    const unsigned char *const nonce;
+
+    /**
+     * The nonce bytes.
+     */
+    const unsigned char *nonce;
+
+    /**
+     * The number of accepted media types.
+     */
     size_t accept_count;
-    const char *const *const accept_types;
+
+    /**
+     * The array of accepted media types. Each entry is a nul-terminated string.
+     */
+    const char *const *accept_types;
 } veraison_challenge_response_session_t;
 
 /**
