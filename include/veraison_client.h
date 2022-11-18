@@ -56,6 +56,11 @@ typedef struct _veraison_challenge_response_session_t {
      * The array of accepted media types. Each entry is a nul-terminated string.
      */
     const char *const *accept_types;
+
+    /**
+     * Nul-terminated string providing the attestation result from the server.
+     */
+    const char *attestation_result;
 } veraison_challenge_response_session_t;
 
 /**

@@ -8,16 +8,15 @@
 int main(int argc, char *argv[])
 {
     veraison_challenge_response_session_t session = {0};
-    const unsigned char my_nonce[] = {0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef};
     const unsigned char my_evidence[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
     veraison_status_t status;
     size_t i;
 
     status = veraison_challenge_response_new_session(
         &session,
-        "http://127.0.0.1:8080/challenge-response/v1/",
-        sizeof(my_nonce),
-        my_nonce);
+        "http://localhost:8080/challenge-response/v1/",
+        32,
+        NULL);
 
     if (status != VERAISON_STATUS_OK)
     {
@@ -31,7 +30,7 @@ int main(int argc, char *argv[])
     {
         printf("    %s\n", session.accept_types[i]);
     }
-    printf("Nonce size: %d bytes", (int) session.nonce_size);
+    printf("Nonce size: %d bytes\n", (int) session.nonce_size);
     printf("Nonce: [");
     for (i = 0; i < session.nonce_size; i++)
     {
@@ -56,6 +55,14 @@ int main(int argc, char *argv[])
         session.accept_types[0],
         sizeof(my_evidence),
         my_evidence);
+
+    if (status != VERAISON_STATUS_OK)
+    {
+        printf("Failed to supply evidence to server.\n");
+        goto cleanup;
+    }
+
+    printf("Raw attestation result string from server: %s\n", session.attestation_result);
 
 cleanup:
     veraison_challenge_response_free_session(&session);

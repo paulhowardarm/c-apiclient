@@ -15,6 +15,7 @@ pub struct ShimRawChallengeResponseSession {
     nonce: *const u8,
     accept_type_count: libc::size_t,
     accept_type_list: *const *const libc::c_char,
+    attestation_result: *const libc::c_char,
     session_wrapper: *mut c_void, // Opaque pointer to ShimCallengeResponseSession
 }
 
@@ -26,6 +27,7 @@ struct ShimChallengeResponseSession {
     nonce_vec: Vec<u8>,
     accept_type_cstring_vec: Vec<CString>,
     accept_type_ptr_vec: Vec<*const libc::c_char>,
+    attestation_result_cstring: CString,
 }
 
 #[no_mangle]
@@ -84,6 +86,7 @@ pub extern "C" fn open_challenge_response_session(
         nonce_vec: session_nonce.clone(),
         accept_type_cstring_vec: media_type_cstrings,
         accept_type_ptr_vec: Vec::with_capacity(session_accept_types.len()),
+        attestation_result_cstring: CString::new("").unwrap(),
     };
 
     // Get the ptr (char*) for each CString and also store that in a Rust-managed Vec.
@@ -99,6 +102,8 @@ pub extern "C" fn open_challenge_response_session(
         nonce: shim_session.nonce_vec.as_ptr(),
         accept_type_count: shim_session.accept_type_ptr_vec.len(),
         accept_type_list: shim_session.accept_type_ptr_vec.as_ptr(),
+        // The attestation result is not known at this stage - it gets populated later.
+        attestation_result: std::ptr::null(),
         // Use Box::into_raw() to "release" the Rust memory so that the pointers all remain valid.
         session_wrapper: Box::into_raw(Box::new(shim_session)) as *mut c_void,
     });
@@ -109,6 +114,64 @@ pub extern "C" fn open_challenge_response_session(
     // we do Box::from_raw() to bring the memory back under Rust management.
     let session_ptr = Box::into_raw(raw_shim_session);
     unsafe { *out_session = session_ptr };
+
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn challenge_response(
+    session: *mut ShimRawChallengeResponseSession,
+    evidence_size: libc::size_t,
+    evidence: *const u8,
+    media_type: *const libc::c_char,
+    session_url: *const libc::c_char,
+) -> u32 {
+    // Unsafe because we need to trust the caller's pointer
+    let mut raw_session = unsafe { Box::from_raw(session) };
+
+    let mut shim_session =
+        unsafe { Box::from_raw(raw_session.session_wrapper as *mut ShimChallengeResponseSession) };
+
+    // Unsafe because we need to trust the caller's pointer
+    let media_type_str: &str = unsafe {
+        let url_cstr = CStr::from_ptr(media_type);
+        url_cstr.to_str().unwrap()
+    };
+
+    // Unsafe because we need to trust the caller's pointer
+    let session_url_str: &str = unsafe {
+        let url_cstr = CStr::from_ptr(session_url);
+        url_cstr.to_str().unwrap()
+    };
+
+    // Unsafe because we need to trust the caller's pointer and size
+    let evidence_bytes = unsafe { slice::from_raw_parts(evidence, evidence_size) };
+
+    // Re-establish the client session.
+    // TODO(paulhowardarm) - This is arguably a misappropriation of ChallengeResponseBuilder, because we already
+    //                       have a session at this point, and we-re re-establishiing it using a session URL rather
+    //                       than a base URL. Re-establishing the client also makes this sub-optimal.
+    // TODO(paulhowardarm) - Using unwrap() here. We need to map errors to a suitable return status because we're
+    //                       in a C-callable context here.
+    let cr = ChallengeResponseBuilder::new()
+        .with_base_url(String::from(session_url_str))
+        .build()
+        .unwrap();
+
+    // Actually call the client
+    let client_result = cr.challenge_response(evidence_bytes, media_type_str, session_url_str);
+
+    match client_result {
+        Ok(attestation_result) => {
+            shim_session.attestation_result_cstring = CString::new(attestation_result).unwrap();
+            raw_session.attestation_result = shim_session.attestation_result_cstring.as_ptr();
+        }
+        Err(_) => println!("The service returned an error."),
+    };
+
+    // Release the raw pointers again
+    let _ = Box::into_raw(shim_session);
+    let _ = Box::into_raw(raw_session);
 
     0
 }

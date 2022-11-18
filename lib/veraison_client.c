@@ -22,6 +22,7 @@ veraison_status_t veraison_challenge_response_new_session(
         session->nonce = session_ptr->nonce;
         session->accept_count = session_ptr->accept_type_count;
         session->accept_types = session_ptr->accept_type_list;
+        session->attestation_result = NULL;
         return VERAISON_STATUS_OK;
     }
     else
@@ -37,7 +38,21 @@ veraison_status_t veraison_challenge_response_supply_evidence(
     size_t evidence_size,
     const unsigned char *const evidence)
 {
-    return VERAISON_STATUS_OK;
+    uint32_t status = 0;
+    ShimRawChallengeResponseSession *session_ptr = (ShimRawChallengeResponseSession *)session->reserved;
+
+    status = challenge_response(session_ptr, evidence_size, evidence, media_type, session->session_url);
+
+    if (status == 0)
+    {
+        session->attestation_result = session_ptr->attestation_result;
+        return VERAISON_STATUS_OK;
+    }
+    else
+    {
+        /* TODO(paulhowardarm) mapping of failing codes from the Rust wrapper to C. */
+        return 1;
+    }
 }
 
 void veraison_challenge_response_free_session(veraison_challenge_response_session_t *session)
@@ -51,5 +66,6 @@ void veraison_challenge_response_free_session(veraison_challenge_response_sessio
         session->nonce = NULL;
         session->accept_count = 0;
         session->accept_types = NULL;
+        session->attestation_result = NULL;
     }
 }
