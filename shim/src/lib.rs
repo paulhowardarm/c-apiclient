@@ -5,7 +5,7 @@ use std::ffi::{c_void, CStr, CString};
 
 use core::slice;
 
-use veraison_apiclient::{ChallengeResponseBuilder, Nonce};
+use veraison_apiclient::{ChallengeResponse, ChallengeResponseBuilder, Nonce};
 
 /// C-compatible representation of the challenge-response session.
 #[repr(C)]
@@ -23,6 +23,7 @@ pub struct ShimRawChallengeResponseSession {
 /// world. This structure is not visible to C other than as an opaque (void*) pointer. Think of it as
 /// being like the private part of a public/private interface.
 struct ShimChallengeResponseSession {
+    client: Box<ChallengeResponse>,
     session_url_cstring: CString,
     nonce_vec: Vec<u8>,
     accept_type_cstring_vec: Vec<CString>,
@@ -82,6 +83,7 @@ pub extern "C" fn open_challenge_response_session(
     // their memory in Rust world. This object is not visible to C world other than as an opaque pointer
     // that can be recovered later.
     let mut shim_session = ShimChallengeResponseSession {
+        client: Box::new(cr),
         session_url_cstring: CString::new(session_uri.as_str()).unwrap(),
         nonce_vec: session_nonce.clone(),
         accept_type_cstring_vec: media_type_cstrings,
@@ -147,19 +149,11 @@ pub extern "C" fn challenge_response(
     // Unsafe because we need to trust the caller's pointer and size
     let evidence_bytes = unsafe { slice::from_raw_parts(evidence, evidence_size) };
 
-    // Re-establish the client session.
-    // TODO(paulhowardarm) - This is arguably a misappropriation of ChallengeResponseBuilder, because we already
-    //                       have a session at this point, and we-re re-establishiing it using a session URL rather
-    //                       than a base URL. Re-establishing the client also makes this sub-optimal.
-    // TODO(paulhowardarm) - Using unwrap() here. We need to map errors to a suitable return status because we're
-    //                       in a C-callable context here.
-    let cr = ChallengeResponseBuilder::new()
-        .with_base_url(String::from(session_url_str))
-        .build()
-        .unwrap();
-
     // Actually call the client
-    let client_result = cr.challenge_response(evidence_bytes, media_type_str, session_url_str);
+    let client_result =
+        shim_session
+            .client
+            .challenge_response(evidence_bytes, media_type_str, session_url_str);
 
     match client_result {
         Ok(attestation_result) => {
