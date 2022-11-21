@@ -5,7 +5,7 @@ use std::ffi::{c_void, CStr, CString};
 
 use core::slice;
 
-use veraison_apiclient::{ChallengeResponse, ChallengeResponseBuilder, Nonce};
+use veraison_apiclient::{ChallengeResponse, ChallengeResponseBuilder, Error, Nonce};
 
 /// C-compatible representation of the challenge-response session.
 #[repr(C)]
@@ -34,7 +34,7 @@ pub enum ShimResult {
 /// world. This structure is not visible to C other than as an opaque (void*) pointer. Think of it as
 /// being like the private part of a public/private interface.
 struct ShimChallengeResponseSession {
-    client: Box<ChallengeResponse>,
+    client: Box<Option<ChallengeResponse>>,
     session_url_cstring: CString,
     nonce_vec: Vec<u8>,
     accept_type_cstring_vec: Vec<CString>,
@@ -73,14 +73,36 @@ pub extern "C" fn open_challenge_response_session(
     };
 
     // Establish the client session.
-    // TODO(paulhowardarm) - Using unwrap() here. We need to map errors to a suitable return status because we're
-    //                       in a C-callable context here.
     let cr = ChallengeResponseBuilder::new()
         .with_base_url(String::from(url_str))
-        .build()
-        .unwrap();
+        .build();
 
-    let (session_uri, session) = cr.new_session(&nonce_converted).unwrap();
+    // Early return on error. The idiom here is slightly odd, and it arguably would be better to use
+    // is_err() and expect_err(), but these require the underlying types to implement the Debug trait,
+    // which they don't.
+    match cr {
+        Ok(_) => {}
+        Err(e) => {
+            // Early return with a stub session containing the error message.
+            return stub_session_from_error(&e, out_session);
+        }
+    }
+
+    // This now won't panic because we dealt with errors by early return above.
+    let cr = cr.unwrap();
+
+    let newsession = cr.new_session(&nonce_converted);
+
+    match newsession {
+        Ok(_) => {}
+        Err(e) => {
+            // Early return with a stub session containing the error message.
+            return stub_session_from_error(&e, out_session);
+        }
+    }
+
+    // This now won't panic because we dealt with errors by early return above.
+    let (session_uri, session) = newsession.unwrap();
 
     let session_nonce = session.nonce().to_vec();
     let session_accept_types = session.accept().to_vec();
@@ -95,7 +117,7 @@ pub extern "C" fn open_challenge_response_session(
     // their memory in Rust world. This object is not visible to C world other than as an opaque pointer
     // that can be recovered later.
     let mut shim_session = ShimChallengeResponseSession {
-        client: Box::new(cr),
+        client: Box::new(Some(cr)),
         session_url_cstring: CString::new(session_uri.as_str()).unwrap(),
         nonce_vec: session_nonce.clone(),
         accept_type_cstring_vec: media_type_cstrings,
@@ -158,25 +180,39 @@ pub extern "C" fn challenge_response(
     let evidence_bytes = unsafe { slice::from_raw_parts(evidence, evidence_size) };
 
     // Actually call the client
-    let client_result = shim_session.client.challenge_response(
-        evidence_bytes,
-        media_type_str,
-        shim_session.session_url_cstring.to_str().unwrap(),
-    );
+    let client_result = match shim_session.client.as_ref() {
+        Some(client) => client.challenge_response(
+            evidence_bytes,
+            media_type_str,
+            shim_session.session_url_cstring.to_str().unwrap(),
+        ),
+        // If we have no client, it means that the session was never properly established in the first place.
+        None => Err(Error::ConfigError(
+            "Cannot supply evidence because there is no session endpoint.".to_string(),
+        )),
+    };
 
-    match client_result {
+    let returncode = match client_result {
         Ok(attestation_result) => {
             shim_session.attestation_result_cstring = CString::new(attestation_result).unwrap();
             raw_session.attestation_result = shim_session.attestation_result_cstring.as_ptr();
+            ShimResult::Ok
         }
-        Err(_) => println!("The service returned an error."),
+        Err(e) => {
+            let (shimresult, message) = translate_error(&e);
+            // Move the message CString into the ShimSession, and its corresponding pointer into the raw
+            // session so that C code can consume it.
+            shim_session.message_cstring = message;
+            raw_session.message = shim_session.message_cstring.as_ptr();
+            shimresult
+        }
     };
 
     // Release the raw pointers again
     let _ = Box::into_raw(shim_session);
     let _ = Box::into_raw(raw_session);
 
-    ShimResult::Ok
+    returncode
 }
 
 #[no_mangle]
@@ -187,4 +223,64 @@ pub extern "C" fn free_challenge_response_session(
     let raw_session = unsafe { Box::from_raw(session) };
     let _ =
         unsafe { Box::from_raw(raw_session.session_wrapper as *mut ShimChallengeResponseSession) };
+}
+
+// This function is used when there is an error while attempting to create the session - either because the
+// ChallengeResponseBuilder::build() method call failed, or because ChallengeResponse::new_session() failed.
+// In either case, we stub out an empty session containing just the error message.
+fn stub_session_from_error(
+    e: &Error,
+    out_session: *mut *mut ShimRawChallengeResponseSession,
+) -> ShimResult {
+    // Get the error code and message by matching on the error type
+    let (returncode, message) = translate_error(e);
+
+    // Create a degenerate/stub session object to represent the failure to establish the session. Most
+    // values are none/empty degnerate (but safe) placeholders.
+    let shim_session = ShimChallengeResponseSession {
+        client: Box::new(None),
+        session_url_cstring: CString::new("").unwrap(),
+        nonce_vec: Vec::new(),
+        accept_type_cstring_vec: Vec::new(),
+        accept_type_ptr_vec: Vec::new(),
+        attestation_result_cstring: CString::new("").unwrap(),
+        // This is the only meaningful field, because we have gleaned an error message.
+        message_cstring: message,
+    };
+
+    // Wrap to C-compatible structure
+    let raw_shim_session = Box::new(ShimRawChallengeResponseSession {
+        session_url: shim_session.session_url_cstring.as_ptr(),
+        nonce_size: shim_session.nonce_vec.len(),
+        nonce: shim_session.nonce_vec.as_ptr(),
+        accept_type_count: shim_session.accept_type_ptr_vec.len(),
+        accept_type_list: shim_session.accept_type_ptr_vec.as_ptr(),
+        attestation_result: std::ptr::null(),
+        message: shim_session.message_cstring.as_ptr(),
+        // Use Box::into_raw() to "release" the Rust memory so that the pointers all remain valid.
+        session_wrapper: Box::into_raw(Box::new(shim_session)) as *mut c_void,
+    });
+
+    // Finally, use Box::into_raw() again for the raw session, so that Rust doesn't dispose it when it
+    // drops out of scope.
+    // C world will pass this pointer back to us in free_challenge_response_session(), at which point
+    // we do Box::from_raw() to bring the memory back under Rust management.
+    let session_ptr = Box::into_raw(raw_shim_session);
+    unsafe { *out_session = session_ptr };
+
+    returncode
+}
+
+// Map a rust client Error variant to a pair of C-compatible ShimResult enum value plus error message as
+// CString object.
+fn translate_error(e: &Error) -> (ShimResult, CString) {
+    match e {
+        Error::ConfigError(s) => (ShimResult::ConfigError, CString::new(s.clone()).unwrap()),
+        Error::ApiError(s) => (ShimResult::ApiError, CString::new(s.clone()).unwrap()),
+        Error::CallbackError(s) => (ShimResult::CallbackError, CString::new(s.clone()).unwrap()),
+        Error::NotImplementedError(s) => (
+            ShimResult::NotImplementedError,
+            CString::new(s.clone()).unwrap(),
+        ),
+    }
 }
