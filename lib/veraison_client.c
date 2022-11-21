@@ -4,17 +4,36 @@
 #include "veraison_client.h"
 #include "bindings.h"
 
+static veraison_status_t map_shim_result_to_veraison_status(const ShimResult shim_result)
+{
+    switch (shim_result)
+    {
+    case Ok:
+        return VERAISON_STATUS_OK;
+    case ConfigError:
+        return VERAISON_STATUS_CONFIG_ERROR;
+    case ApiError:
+        return VERAISON_STATUS_API_ERROR;
+    case CallbackError:
+        return VERAISON_STATUS_CALLBACK_ERROR;
+    case NotImplementedError:
+        return VERAISON_STATUS_NOT_IMPLEMENTED_ERROR;
+    default:
+        return VERAISON_STATUS_UNMAPPED_ERROR;
+    }
+}
+
 veraison_status_t veraison_challenge_response_new_session(
     veraison_challenge_response_session_t *session,
     const char *const base_url,
     size_t nonce_size,
     const unsigned char *const nonce)
 {
-    uint32_t status = 0;
+    ShimResult status;
     ShimRawChallengeResponseSession *session_ptr = NULL;
     status = open_challenge_response_session(base_url, nonce_size, nonce, &session_ptr);
 
-    if (status == 0)
+    if (status == Ok)
     {
         session->reserved = (void *)session_ptr;
         session->session_url = session_ptr->session_url;
@@ -28,8 +47,8 @@ veraison_status_t veraison_challenge_response_new_session(
     }
     else
     {
-        /* TODO(paulhowardarm) mapping of failing codes from the Rust wrapper to C. */
-        return 1;
+        session->message = session_ptr->message;
+        return map_shim_result_to_veraison_status(status);
     }
 }
 
@@ -39,20 +58,20 @@ veraison_status_t veraison_challenge_response_supply_evidence(
     size_t evidence_size,
     const unsigned char *const evidence)
 {
-    uint32_t status = 0;
+    ShimResult status;
     ShimRawChallengeResponseSession *session_ptr = (ShimRawChallengeResponseSession *)session->reserved;
 
     status = challenge_response(session_ptr, evidence_size, evidence, media_type);
 
-    if (status == 0)
+    if (status == Ok)
     {
         session->attestation_result = session_ptr->attestation_result;
         return VERAISON_STATUS_OK;
     }
     else
     {
-        /* TODO(paulhowardarm) mapping of failing codes from the Rust wrapper to C. */
-        return 1;
+        session->message = session_ptr->message;
+        return map_shim_result_to_veraison_status(status);
     }
 }
 

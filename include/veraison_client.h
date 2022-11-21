@@ -21,6 +21,11 @@ extern "C" {
 typedef int veraison_status_t;
 
 #define VERAISON_STATUS_OK ((veraison_status_t) 0)
+#define VERAISON_STATUS_CONFIG_ERROR ((veraison_status_t) 1)
+#define VERAISON_STATUS_API_ERROR ((veraison_status_t) 2)
+#define VERAISON_STATUS_CALLBACK_ERROR ((veraison_status_t) 3)
+#define VERAISON_STATUS_NOT_IMPLEMENTED_ERROR ((veraison_status_t) 4)
+#define VERAISON_STATUS_UNMAPPED_ERROR ((veraison_status_t) 255)
 
 /**
  * This structure encpasulates the details of a challenge/response API session.
