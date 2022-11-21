@@ -24,6 +24,9 @@ shim/bindings.h
 # Example binary
 example/veraison_challenge_response
 
+# Ignore transient wiremock artifacts
+example/wiremock/__files
+
 # Object files
 *.o
 *.ko
