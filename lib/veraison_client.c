@@ -41,7 +41,7 @@ veraison_status_t veraison_challenge_response_supply_evidence(
     uint32_t status = 0;
     ShimRawChallengeResponseSession *session_ptr = (ShimRawChallengeResponseSession *)session->reserved;
 
-    status = challenge_response(session_ptr, evidence_size, evidence, media_type, session->session_url);
+    status = challenge_response(session_ptr, evidence_size, evidence, media_type);
 
     if (status == 0)
     {

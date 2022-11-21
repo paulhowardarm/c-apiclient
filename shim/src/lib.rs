@@ -126,7 +126,6 @@ pub extern "C" fn challenge_response(
     evidence_size: libc::size_t,
     evidence: *const u8,
     media_type: *const libc::c_char,
-    session_url: *const libc::c_char,
 ) -> u32 {
     // Unsafe because we need to trust the caller's pointer
     let mut raw_session = unsafe { Box::from_raw(session) };
@@ -140,20 +139,15 @@ pub extern "C" fn challenge_response(
         url_cstr.to_str().unwrap()
     };
 
-    // Unsafe because we need to trust the caller's pointer
-    let session_url_str: &str = unsafe {
-        let url_cstr = CStr::from_ptr(session_url);
-        url_cstr.to_str().unwrap()
-    };
-
     // Unsafe because we need to trust the caller's pointer and size
     let evidence_bytes = unsafe { slice::from_raw_parts(evidence, evidence_size) };
 
     // Actually call the client
-    let client_result =
-        shim_session
-            .client
-            .challenge_response(evidence_bytes, media_type_str, session_url_str);
+    let client_result = shim_session.client.challenge_response(
+        evidence_bytes,
+        media_type_str,
+        shim_session.session_url_cstring.to_str().unwrap(),
+    );
 
     match client_result {
         Ok(attestation_result) => {
