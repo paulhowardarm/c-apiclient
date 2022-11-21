@@ -59,8 +59,17 @@ typedef struct _veraison_challenge_response_session_t {
 
     /**
      * Nul-terminated string providing the attestation result from the server.
+     * 
+     * This pointer is only valid following a successful call to veraison_challenge_response_supply_evidence().
      */
     const char *attestation_result;
+
+    /**
+     * Nul-terminated string providing readable logging message from the most recent session operation.
+     * 
+     * This pointer can be NULL when the most recent operation did not result in a logging message.
+     */
+    const char *message;
 } veraison_challenge_response_session_t;
 
 /**

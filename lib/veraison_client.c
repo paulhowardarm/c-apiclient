@@ -23,6 +23,7 @@ veraison_status_t veraison_challenge_response_new_session(
         session->accept_count = session_ptr->accept_type_count;
         session->accept_types = session_ptr->accept_type_list;
         session->attestation_result = NULL;
+        session->message = NULL;
         return VERAISON_STATUS_OK;
     }
     else
@@ -67,5 +68,6 @@ void veraison_challenge_response_free_session(veraison_challenge_response_sessio
         session->accept_count = 0;
         session->accept_types = NULL;
         session->attestation_result = NULL;
+        session->message = NULL;
     }
 }

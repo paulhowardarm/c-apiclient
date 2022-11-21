@@ -16,7 +16,18 @@ pub struct ShimRawChallengeResponseSession {
     accept_type_count: libc::size_t,
     accept_type_list: *const *const libc::c_char,
     attestation_result: *const libc::c_char,
+    message: *const libc::c_char,
     session_wrapper: *mut c_void, // Opaque pointer to ShimCallengeResponseSession
+}
+
+/// C-compatible enum representation of the error enum from the Rust client.
+#[repr(C)]
+pub enum ShimResult {
+    Ok = 0,
+    ConfigError,
+    ApiError,
+    CallbackError,
+    NotImplementedError,
 }
 
 /// This structure contains the Rust-managed objects that are behind the raw pointers sent back to C
@@ -29,6 +40,7 @@ struct ShimChallengeResponseSession {
     accept_type_cstring_vec: Vec<CString>,
     accept_type_ptr_vec: Vec<*const libc::c_char>,
     attestation_result_cstring: CString,
+    message_cstring: CString,
 }
 
 #[no_mangle]
@@ -37,7 +49,7 @@ pub extern "C" fn open_challenge_response_session(
     nonce_size: libc::size_t,
     nonce: *const u8,
     out_session: *mut *mut ShimRawChallengeResponseSession,
-) -> u32 {
+) -> ShimResult {
     // Unsafe region because we have to trust the caller's char* ptr.
     let url_str: &str = unsafe {
         let url_cstr = CStr::from_ptr(base_url);
@@ -89,6 +101,7 @@ pub extern "C" fn open_challenge_response_session(
         accept_type_cstring_vec: media_type_cstrings,
         accept_type_ptr_vec: Vec::with_capacity(session_accept_types.len()),
         attestation_result_cstring: CString::new("").unwrap(),
+        message_cstring: CString::new("").unwrap(),
     };
 
     // Get the ptr (char*) for each CString and also store that in a Rust-managed Vec.
@@ -106,6 +119,8 @@ pub extern "C" fn open_challenge_response_session(
         accept_type_list: shim_session.accept_type_ptr_vec.as_ptr(),
         // The attestation result is not known at this stage - it gets populated later.
         attestation_result: std::ptr::null(),
+        // No message at this point
+        message: std::ptr::null(),
         // Use Box::into_raw() to "release" the Rust memory so that the pointers all remain valid.
         session_wrapper: Box::into_raw(Box::new(shim_session)) as *mut c_void,
     });
@@ -117,7 +132,7 @@ pub extern "C" fn open_challenge_response_session(
     let session_ptr = Box::into_raw(raw_shim_session);
     unsafe { *out_session = session_ptr };
 
-    0
+    ShimResult::Ok
 }
 
 #[no_mangle]
@@ -126,7 +141,7 @@ pub extern "C" fn challenge_response(
     evidence_size: libc::size_t,
     evidence: *const u8,
     media_type: *const libc::c_char,
-) -> u32 {
+) -> ShimResult {
     // Unsafe because we need to trust the caller's pointer
     let mut raw_session = unsafe { Box::from_raw(session) };
 
@@ -161,7 +176,7 @@ pub extern "C" fn challenge_response(
     let _ = Box::into_raw(shim_session);
     let _ = Box::into_raw(raw_session);
 
-    0
+    ShimResult::Ok
 }
 
 #[no_mangle]
